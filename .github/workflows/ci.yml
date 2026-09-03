@@ -1,0 +1,113 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.9", "3.10", "3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+          pip install pytest
+
+      - name: Tests (pinned totals)
+        run: |
+          python -m pytest tests/ -q --junitxml=results.xml
+          python - <<'PY'
+          import xml.etree.ElementTree as ET
+          s = ET.parse("results.xml").getroot()
+          s = s.find("testsuite") if s.tag == "testsuites" else s
+          got = {k: int(s.get(k, 0)) for k in ("tests", "failures", "errors", "skipped")}
+          print(got)
+          # Pinned so a test that silently stops running fails the build.
+          assert got == {"tests": 250, "failures": 0, "errors": 0, "skipped": 0}, got
+          print("pinned totals match")
+          PY
+
+      - name: Two-sided — a clean config set must be silent
+        run: |
+          set +e
+          python -m hooklint tests/fixtures/clean > clean.txt 2>&1
+          code=$?
+          set -e
+          # Note the shell discipline: hooklint exits non-zero BY DESIGN on findings,
+          # so every invocation below captures $? explicitly. The previous workflow
+          # ran `hooklint ...; test $? -eq 1` under `bash -e`, which aborted the step
+          # on the non-zero exit before `test` ever ran.
+          test "$code" = "0" || { echo "clean fixtures must exit 0, got $code"; cat clean.txt; exit 1; }
+          echo "clean fixtures report nothing"
+
+      - name: Planted defects are detected
+        run: |
+          set +e
+          python -m hooklint tests/fixtures/planted/dead_matcher > dm.json 2>&1
+          code=$?
+          set -e
+          test "$code" = "1" || { echo "planted dead_matcher must exit 1, got $code"; exit 1; }
+          grep -q dead_matcher dm.json || { echo "expected a dead_matcher finding"; cat dm.json; exit 1; }
+          echo "planted dead_matcher detected"
+
+      - name: Shell tokenization is real parsing, not a regex
+        run: |
+          python - <<'PY'
+          import json, subprocess, sys, tempfile, os, pathlib
+          def run(cmd):
+              d = tempfile.mkdtemp(); c = pathlib.Path(d, ".claude"); c.mkdir()
+              (c / "settings.json").write_text(json.dumps({"hooks": {"PreToolUse": [
+                  {"matcher": "Bash", "hooks": [{"type": "command", "command": cmd}]}]}}))
+              p = subprocess.run([sys.executable, "-m", "hooklint", d, "--json"],
+                                 capture_output=True, text=True)
+              return {f["rule_id"] for f in json.loads(p.stdout).get("findings", [])}
+          # Unquoted expansion is injectable; the single-quoted form is not. A regex
+          # for "$" cannot tell these apart -- only tokenization can.
+          assert "unquoted_interpolation" in run('echo $CLAUDE_TOOL_INPUT')
+          assert "unquoted_interpolation" not in run("echo '$CLAUDE_TOOL_INPUT'")
+          # Arithmetic expansion is not a variable expansion.
+          assert "unquoted_interpolation" not in run('echo $((1+2))')
+          # An escaped dollar is a literal.
+          assert "unquoted_interpolation" not in run(r'echo \$NOT_AN_EXPANSION')
+          print("shell tokenization holds on quoting edge cases")
+          PY
+
+      - name: Determinism across processes
+        run: |
+          python - <<'PY'
+          import hashlib, os, subprocess, sys
+          digests = set()
+          for seed in ("0", "1", "42", "1337"):
+              env = dict(os.environ, PYTHONHASHSEED=seed)
+              out = subprocess.run([sys.executable, "-m", "hooklint",
+                                    "tests/fixtures/planted", "--json"],
+                                   capture_output=True, env=env).stdout
+              digests.add(hashlib.sha256(out).hexdigest())
+          assert len(digests) == 1, f"non-deterministic across hash seeds: {digests}"
+          print("byte-identical across 4 PYTHONHASHSEED values")
+          PY
+
+      - name: Exit-code contract (0 / 1 / 2)
+        run: |
+          set +e
+          python -m hooklint tests/fixtures/clean >/dev/null 2>&1
+          test $? = 0 || { echo "clean must exit 0"; exit 1; }
+          python -m hooklint tests/fixtures/planted/dead_matcher >/dev/null 2>&1
+          test $? = 1 || { echo "findings must exit 1"; exit 1; }
+          python -m hooklint ./no_such_dir_at_all >/dev/null 2>&1
+          test $? = 2 || { echo "bad input must exit 2"; exit 1; }
+          set -e
+          echo "exit-code contract holds (0 / 1 / 2 all asserted)"

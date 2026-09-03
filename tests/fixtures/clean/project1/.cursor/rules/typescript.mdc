@@ -1,0 +1,6 @@
+---
+description: TypeScript style rules
+globs: ["**/*.ts", "**/*.tsx"]
+alwaysApply: false
+---
+Prefer readonly, avoid any.

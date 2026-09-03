@@ -1,0 +1,7 @@
+{
+  "mcpServers": {
+    "foo": {
+      "command": "./bin/nonexistent-server.js"
+    }
+  }
+}

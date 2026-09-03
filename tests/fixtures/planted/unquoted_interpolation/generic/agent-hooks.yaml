@@ -1,0 +1,4 @@
+hooks:
+  pre_tool_use:
+    - match: shell
+      run: echo $USER_MESSAGE

@@ -1,0 +1,5 @@
+allow:
+  - "shell(git status:*)"
+  - "read_file(./docs/**)"
+deny:
+  - "read_file(./secrets.env)"

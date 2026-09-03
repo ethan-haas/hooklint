@@ -1,0 +1,7 @@
+hooks:
+  pre_tool_use:
+    - match: shell
+      run: scripts/audit.sh
+  post_tool_use:
+    - match: write_file
+      run: scripts/format.sh

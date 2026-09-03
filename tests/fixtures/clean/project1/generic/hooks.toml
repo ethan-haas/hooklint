@@ -1,0 +1,4 @@
+[[hook]]
+event = "pre_tool_use"
+matcher = "read_file"
+command = "scripts/log-read.sh"

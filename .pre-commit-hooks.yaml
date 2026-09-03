@@ -1,0 +1,29 @@
+# Drop this into your repo as .pre-commit-hooks.yaml (or copy the single
+# entry below into your own .pre-commit-hooks.yaml if you already have
+# one), then reference it from a consumer repo's .pre-commit-config.yaml:
+#
+#   repos:
+#     - repo: https://github.com/ethan-haas/hooklint
+#       rev: v0.1.0
+#       hooks:
+#         - id: hooklint
+#
+- id: hooklint
+  name: hooklint
+  description: >-
+    Offline, deterministic linter for agent hook/skill/MCP configs. Parses,
+    never executes.
+  entry: hooklint
+  language: python
+  files: >-
+    (?x)^(
+      \.claude/settings(\.local)?\.json|
+      \.claude/skills/.*/SKILL\.md|
+      \.claude/commands/.*\.md|
+      \.cursor/rules/.*\.mdc|
+      \.cursor/mcp\.json|
+      \.mcp\.json|
+      AGENTS\.md
+    )$
+  pass_filenames: false
+  always_run: false
